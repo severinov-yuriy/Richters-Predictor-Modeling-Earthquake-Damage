@@ -1,0 +1,1 @@
+# Richters-Predictor-Modeling-Earthquake-Damage
