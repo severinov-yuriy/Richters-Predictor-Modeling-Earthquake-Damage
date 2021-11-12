@@ -1,0 +1,693 @@
+---
+title: "Richter's Predictor: Modeling Earthquake Damage"
+author: "Severinov Yuriy, Chernysheva Mariya, Makhmutshina Kamila"
+date: "6/20/2021"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+library(ggplot2) # Basic plot making library
+library(GGally) # To use ggpairs
+library(ggfortify) # To use autoplot
+library(gridExtra) # To make numbers of graphics in one space
+library(RColorBrewer) # To color graphics easier
+library(reshape2) # To make heatmap
+library(modelr) # To make logistic regression model
+library(dplyr) # To use data manipulation tools
+library(scales) # Makes maling graphics easier. Процентный формат для осей ggplot
+library(memisc) # Stack of tools. To work with tables for us??
+library(tidyverse) # Трансформация и визуализация данных
+library(rpart) # Деревья в R: recursive partitioning
+library(C50) # Деревья в R: C5.0
+library(party) # Деревья в R: conditional inference
+library(rpart.plot) # Визуализация деревьев
+library(partykit) # Визуализация деревьев
+library(rattle) # Provides a graphical user interface to very many other R packages
+library(mlr) # Фреймворк для машинного обучения, здесь используется для подсчета показателей ошибки
+library(ROCR) # Построение ROC-кривых
+library(forcats) # Работа с факторными переменными
+library(parallelMap) # распараллеливание задач
+library(nnet) # Fitting neural networks
+library(randomForest) # Modeling Random Forests
+library(h2o) # Modeling h2o
+library(xgboost) # Modeling XGBoost
+library(mltools) # To convert categorical variables into numerical
+library(data.table) # To convert categorical variables into numerical
+library(GenSA) # To tune Random Forest model 
+library(randomForestExplainer)
+```
+
+
+# Task
+
+
+The April 2015 Nepal earthquake (also known as the Gorkha earthquake) killed nearly 9,000 people and injured nearly 22,000. It occurred at 11:56 Nepal Standard Time on 25 April 2015, with a magnitude of 7.8 Mw or 8.1Ms and a maximum Mercalli Intensity of VIII (Severe).
+
+
+Almost 9,000 lives were lost, millions of people were instantly made homeless, and $10 billion in damages––about half of Nepal's nominal GDP––were incurred. In the years since, the Nepalese government has worked intensely to help rebuild the affected districts' infrastructures. Throughout this process, the National Planning Commission, along with Kathmandu Living Labs and the Central Bureau of Statistics, has generated one of the largest post-disaster datasets ever collected, containing valuable information on earthquake impacts, household conditions, and socio-economic-demographic statistics.
+
+
+From the portal about earthquake:
+
+> Following the 7.8 Mw Gorkha Earthquake on April 25, 2015, Nepal carried out a massive household survey using mobile technology to assess building damage in the earthquake-affected districts. Although the primary goal of this survey was to identify beneficiaries eligible for government assistance for housing reconstruction, it also collected other useful socio-economic information. In addition to housing reconstruction, this data serves a wide range of uses and users e.g. researchers, newly formed local governments, and citizens at large. The purpose of this portal is to open this data to the public.
+
+
+**We're need to predict the ordinal variable `damage_grade`, which represents a level of damage to the building that was hit by the earthquake**. There are 3 grades of the damage:
+
+  - **1** - represents low damage
+  - **2** - represents a medium amount of damage
+  - **3** - represents almost complete destruction
+  
+
+It may help in the future, to customize insuranсe, to choose construction type of buildings in seismic dangerous districts to save people's lives, money and make the situation with earthquakes less disastrous.
+
+The dataset mainly consists of information on the buildings' structure and their legal ownership. Each row in the dataset represents a specific building in the region that was hit by Gorkha earthquake.
+
+There are 39 columns in this dataset, where the `building_id` column is a unique and random identifier. The remaining 38 features are described in the section below. Categorical variables have been obfuscated random lowercase ascii characters. The appearance of the same character in distinct columns does not imply the same original value.
+
+Description of variables:
+
+ - `geo_level_1_id, geo_level_2_id, geo_level_3_id` (type: int): geographic region in which building exists, from largest (level 1) to most specific sub-region (level 3). Possible values: level 1: 0-30, level 2: 0-1427, level 3: 0-12567.
+ 
+ - `count_floors_pre_eq` (type: int): number of floors in the building before the earthquake.
+ 
+ - `age` (type: int): age of the building in years.
+
+ - `area_percentage` (type: int): normalized area of the building footprint.
+
+ - `height_percentage` (type: int): normalized height of the building footprint.
+
+ - `land_surface_condition` (type: categorical): surface condition of the land where the building was built. Possible values: n, o, t.
+
+ - `foundation_type` (type: categorical): type of foundation used while building. Possible values: h, i, r, u, w.
+
+ - `roof_type` (type: categorical): type of roof used while building. Possible values: n, q, x.
+
+ - `ground_floor_type` (type: categorical): type of the ground floor. Possible values: f, m, v, x, z.
+
+ - `other_floor_type` (type: categorical): type of constructions used in higher than the ground floors (except of roof). Possible values: j, q, s, x.
+
+ - `position` (type: categorical): position of the building. Possible values: j, o, s, t.
+
+ - `plan_configuration` (type: categorical): building plan configuration. Possible values: a, c, d, f, m, n, o, q, s, u.
+
+ - `has_superstructure_adobe_mud` (type: binary): flag variable that indicates if the superstructure was made of Adobe/Mud.
+
+ - `has_superstructure_mud_mortar_stone` (type: binary): flag variable that indicates if the superstructure was made of Mud Mortar - Stone.
+
+ - `has_superstructure_stone_flag` (type: binary): flag variable that indicates if the superstructure was made of Stone.
+
+ - `has_superstructure_cement_mortar_stone` (type: binary): flag variable that indicates if the superstructure was made of Cement Mortar - Stone.
+
+ - `has_superstructure_mud_mortar_brick` (type: binary): flag variable that indicates if the superstructure was made of Mud Mortar - Brick.
+
+ - `has_superstructure_cement_mortar_brick` (type: binary): flag variable that indicates if the superstructure was made of Cement Mortar - Brick.
+
+ - `has_superstructure_timber` (type: binary): flag variable that indicates if the superstructure was made of Timber.
+
+ - `has_superstructure_bamboo` (type: binary): flag variable that indicates if the superstructure was made of Bamboo.
+
+ - `has_superstructure_rc_non_engineered` (type: binary): flag variable that indicates if the superstructure was made of non-engineered reinforced concrete.
+
+ - `has_superstructure_rc_engineered` (type: binary): flag variable that indicates if the superstructure was made of engineered reinforced concrete.
+
+ - `has_superstructure_other` (type: binary): flag variable that indicates if the superstructure was made of any other material.
+
+ - `legal_ownership_status` (type: categorical): legal ownership status of the land where building was built. Possible values: a, r, v, w.
+
+ - `count_families` (type: int): number of families that live in the building.
+
+ - `has_secondary_use` (type: binary): flag variable that indicates if the building was used for any secondary purpose.
+
+ - `has_secondary_use_agriculture` (type: binary): flag variable that indicates if the building was used for agricultural purposes.
+
+ - `has_secondary_use_hotel` (type: binary): flag variable that indicates if the building was used as a hotel.
+
+ - `has_secondary_use_rental` (type: binary): flag variable that indicates if the building was used for rental purposes.
+
+ - `has_secondary_use_institution` (type: binary): flag variable that indicates if the building was used as a location of any institution.
+
+ - `has_secondary_use_school` (type: binary): flag variable that indicates if the building was used as a school.
+
+ - `has_secondary_use_industry` (type: binary): flag variable that indicates if the building was used for industrial purposes.
+
+ - `has_secondary_use_health_post` (type: binary): flag variable that indicates if the building was used as a health post.
+
+ - `has_secondary_use_gov_office` (type: binary): flag variable that indicates if the building was used fas a government office.
+
+ - `has_secondary_use_use_police` (type: binary): flag variable that indicates if the building was used as a police station.
+
+ - `has_secondary_use_other` (type: binary): flag variable that indicates if the building was secondarily used for other purposes.
+
+
+# Solution
+
+
+## Loading the data
+
+
+First of all, let's import dataset and merge it with its values of damage.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+variables <- read_csv('Train_Values.csv')
+values <- read_csv('Train_Labels.csv')
+earthquake <- merge(variables, values, by="building_id")
+```
+
+
+Then we need to explore our data.
+
+
+## Exploratory data analysis
+
+
+We start by considering the pairwise correlations between variables. Because there are a lot of binary variables, displaying different minor house characteristics, that may overload the plot, we only employ the quantitative variables and categorical variables representing more meaningful house features. Ggpair plots are then graphed for these variables, colored by the level of damage. We use test subset to make the plots easier to draw
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggpairs(data = earthquake[c("damage_grade", "count_floors_pre_eq", "age", "area_percentage" , "height_percentage", "count_families")],
+        title='relations between varibles',
+        mapping=ggplot2::aes(colour = as.factor(damage_grade)))
+```
+
+
+To see correlations between variables, we dropped category variables and visualize the remaining ones on the heatmap.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+cormat <- melt(round(cor(earthquake %>% dplyr::select(-c('land_surface_condition', 'foundation_type', 'roof_type', 'ground_floor_type', 'other_floor_type', 'position', 'plan_configuration', 'land_surface_condition', 'legal_ownership_status', 'damage_grade'))), 2))
+ggplot(data = cormat, aes(x=Var1, y=Var2, fill=value)) +
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 90), aspect.ratio=9/10)
+```
+
+
+What we can say, looking on the heatmap?
+   - correlations between variables are generally very weak, a lot lower than 0.5.;
+   - has_secondary_use correlating with its subtypes;
+   - height_percentage is correlating with count_floors_pre_eq stronger that any other pairs;
+   - area_percentage and height_percentage correlating with has_super_structure features and secondary use of buildings.
+
+
+Let's look closer to the damage distribution.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(data=earthquake,
+       aes(x=as.factor(damage_grade))) +
+       geom_bar()
+```
+
+
+We see, that the earthquake bring a lot of medium damage and near the third part of buildings was totally destroyed. 
+
+
+We may predict that older buildings could be much more sensitive to the earthquakes. However, if we consider ancient constructions, existing for around 1000 years, we may assume that they have already experienced several disasters are still safe. Hence, we examine the distribution of age of buildings across the level of damage extensively for the main cluster of houses as well as for the cluster of the ancient ones..
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+p1 <- ggplot(earthquake) +
+  geom_histogram(aes(x = age, fill = as.factor(damage_grade)), bins = 200) +
+  scale_x_continuous()
+p2 <- ggplot(earthquake) +
+  geom_histogram(aes(x = age, fill = as.factor(damage_grade)), bins = 24) +
+  scale_x_continuous(limits = c(-12, 110), breaks = seq(0, 110, 5))
+p3 <- ggplot(earthquake) +
+  geom_histogram(aes(x = age, fill = as.factor(damage_grade)), bins = 22) +
+  scale_x_continuous(limits = c(950, 1050)) +
+  theme(legend.position='none')
+p4 <- ggplot(earthquake) +
+  geom_histogram(aes(x = age, fill = as.factor(damage_grade)), bins = 22) +
+  scale_x_continuous(limits = c(-1, 2)) +
+  theme(legend.position='none')
+grid.arrange(p1, p2, grid.arrange(p4, p3, ncol = 2), ncol = 1)
+```
+
+
+We decided to look closer to the proportions on damage across the age of building.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(earthquake) +
+  geom_bar(aes(x = age, fill = as.factor(damage_grade)), position = "fill") +
+  scale_x_continuous(limits = c(-12, 110))
+```
+
+
+On that plots we can see that our prediction was wrong and less older buildings were also sufficiently affected. But the older buildings have more of a serious damage, than the newer ones. As we note on the histogram, the age distribution is skewed to the right.
+
+We can also see a peculiar appendix in the right part of plot. It seems that lots of ancient buildings have age of 1000 years in documents, despite of their real age (constructions aged 500, 1200 etc. may be combined for the simplicity).
+
+Other odd observation is that lots of buildings have age of 0. The next step after 0 is 5. It looks as if buildings younger that 4 years old have been labeled as new in documents. And only those buildings have lower damage grade than low ones.
+
+
+Then let's turn to the `area_percentage`, `height_percentage` and `count_families` variables. It seems that distribution of them is close to be normal.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+p1 <- ggplot(earthquake) +
+  geom_histogram(aes(x = area_percentage,
+                     fill = as.factor(damage_grade)), bins = 26) +
+  scale_x_continuous(limits = c(0, 25), breaks = seq(0, 25, 1))
+p2 <- ggplot(earthquake) +
+  geom_histogram(aes(x = height_percentage,
+                     fill = as.factor(damage_grade)), bins = 15) +
+  scale_x_continuous(limits = c(0, 14), breaks = seq(0, 14, 1))
+p3 <- ggplot(earthquake) +
+  geom_histogram(aes(x = count_families,
+                     fill = as.factor(damage_grade)), bins = 8) +
+  scale_x_continuous(limits = c(-1, 5), breaks = seq(-1, 5, 1))
+grid.arrange(p1, p2, p3, ncol = 1)
+```
+
+
+Then we want to discover how the number of floors impacts the destruction probability. We assume that higher building can be less sustainable to the earthquake, but on the other hand, they could have more progressive and effective settings in construction to resist the natural disasters. So let's have a look at the plot.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(earthquake) +
+  geom_bar(aes(x = count_floors_pre_eq,
+                     fill = as.factor(damage_grade)))
+```
+
+
+We see that the amount of seriously damaged higher buildings is much greater than of the lower ones.
+
+
+Now we can examine the categorical variables.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+p1 <- ggplot(data = earthquake,
+             aes(x = land_surface_condition,
+                 fill = as.factor(damage_grade))) +
+  geom_bar() + theme(legend.position="bottom")
+p2 <- ggplot(data = earthquake,
+             aes(x = foundation_type,
+                 fill = as.factor(damage_grade))) +
+  geom_bar() + theme(legend.position="bottom")
+p3 <- ggplot(data = earthquake,
+             aes(x = roof_type,
+                 fill = as.factor(damage_grade))) +
+  geom_bar() + theme(legend.position='none')
+p4 <- ggplot(data = earthquake,
+             aes(x = ground_floor_type,
+                 fill = as.factor(damage_grade))) +
+  geom_bar() + theme(legend.position='none')
+p5 <- ggplot(data = earthquake,
+             aes(x = other_floor_type,
+                 fill = as.factor(damage_grade))) +
+  geom_bar() + theme(legend.position="bottom")
+p6 <- ggplot(data = earthquake,
+             aes(x = position,
+                 fill = as.factor(damage_grade))) +
+  geom_bar() + theme(legend.position="bottom")
+p7 <- ggplot(data = earthquake,
+             aes(x = plan_configuration,
+                 fill = as.factor(damage_grade))) +
+  geom_bar() + theme(legend.position='none')
+p8 <- ggplot(data = earthquake,
+             aes(x = legal_ownership_status,
+                 fill = as.factor(damage_grade))) +
+  geom_bar() + theme(legend.position='none')
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+grid.arrange(p5, p6, p7, p8, ncol = 2)
+```
+
+
+We expect that depending on age, some of the variables might behave differently, because of diverse constructions, reconstructions and overhauls.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(earthquake) +
+  geom_bar(aes(x = age, fill = as.factor(damage_grade)), position = "fill") +
+  scale_x_continuous(limits = c(-12, 110)) +
+  facet_wrap(~ count_floors_pre_eq)
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(earthquake) +
+  geom_point(aes(x = age, y = area_percentage, color = as.factor(damage_grade))) +
+  scale_x_continuous(limits = c(-12, 110))
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(earthquake) +
+  geom_point(aes(x = age, y = height_percentage, color = as.factor(damage_grade))) +
+  scale_x_continuous(limits = c(-12, 110))
+```
+
+
+Then we assumed that depending on number of floors, area and height may behave different, so we decided to explore them too.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(earthquake) +
+  geom_histogram(aes(x = area_percentage, fill = as.factor(damage_grade))) +
+  scale_x_continuous(limits = c(0, 50)) +
+  facet_wrap(~ count_floors_pre_eq, scales = "free_y")
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(earthquake) +
+  geom_histogram(aes(x = height_percentage, fill = as.factor(damage_grade))) +
+  scale_x_continuous(limits = c(0, 30)) +
+  facet_wrap(~ count_floors_pre_eq, scales = "free_y")
+```
+
+
+
+
+Then we can expect that more populous buildings would be of a low quality, cheaper, and hence less sustainable.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(earthquake) +
+  geom_histogram(aes(x = area_percentage, fill = as.factor(damage_grade))) +
+  scale_x_continuous(limits = c(0, 75)) +
+  facet_wrap(~ count_families, scales = "free_y")
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+ggplot(earthquake) +
+  geom_histogram(aes(x = height_percentage, fill = as.factor(damage_grade))) +
+  scale_x_continuous(limits = c(0, 30)) +
+  facet_wrap(~ count_families, scales = "free_y")
+```
+
+
+As we observe, depending on age, floor and family count, variables can indeed behave in different ways. We'll include their interactions into the dataset and it might help us to get better results.
+
+
+What we conclude after exploring our data:
+
+ - `area_percentage` and `height_percentage` are correlating;
+ - has_secondary_use correlates with its subtypes;
+ - height_percentage is correlating with count_floors_pre_eq stronger than any other pairs of variables;
+ - area_percentage and height_percentage are correlating with has_super_structure features and secondary use of buildings;
+ - older buildings suffered from more damage, than the newer ones, but newer buildings were still fairly damaged;
+ - percent of seriously damaged higher buildings is much more than of the lower ones;
+ - depending on age, count of floors, number of families, variables actually behave in different way.
+ 
+
+
+## Preparing the data
+
+
+Let's see, what data we have in our dataset.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+str(earthquake)
+```
+
+
+Models can work worse if the dataset has missing values. Therefore, we checked data to find them.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+dim(earthquake %>%
+      filter(is.na(earthquake)))
+```
+
+
+We detect that the dataset is clear from missing values, so we can move on.
+
+
+Some of the models are unable to work with categorical variables. To solve that problem, we decided to convert such variables into factors.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+variables$land_surface_condition <- factor(variables$land_surface_condition)
+variables$foundation_type <- factor(variables$foundation_type)
+variables$roof_type <- factor(variables$roof_type)
+variables$ground_floor_type <- factor(variables$ground_floor_type)
+variables$other_floor_type <- factor(variables$other_floor_type)
+variables$position <- factor(variables$position)
+variables$plan_configuration <- factor(variables$plan_configuration)
+variables$legal_ownership_status <- factor(variables$legal_ownership_status)
+```
+
+
+To optimize the performance of the models, let's convert them into dummies.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+variables_dummy <- as.data.frame(one_hot(as.data.table(variables)))
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+earthquake_prepared <- merge(variables_dummy, values, by="building_id")
+earthquake_prepared$damage_grade <- factor(earthquake_prepared$damage_grade)
+```
+
+
+Beyond that we found that volume of data is extremely large and modeling takes a lot of time. To reduce risks, we decided to take 10% part of our dataset and set benchmark models on it.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+set.seed(2626462)
+test_ids <- sample.int(nrow(earthquake_prepared), size = nrow(earthquake_prepared) * 0.1)
+earthquake_benchmark <- earthquake_prepared[test_ids, ]
+```
+
+
+As the most common value of target variable `damage_grade`, medium amount of damage will be used by us as a basic value. So we Re-level dataset by that value.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+earthquake_benchmark$damage_grade <- relevel(earthquake_benchmark$damage_grade, ref = '2')
+```
+
+
+Now we are ready to make our model.
+
+
+## Making models
+
+
+While choosing the model, we faced the fact that logistic regression is unable to predict ordinal variables. Searching for the solution of this problem, we found multinomial and ordinal regression. Ordinal regression works well while distances between points of predictions are not equal. In our situation, when we don't know the economic difference between three grades of damage, we decided to concentrate on multinomial regression.
+
+
+Except these models we will use familiar to us decision trees and xgboost package, which is boosting decision trees.
+
+To automatize the modeling process, we decided to use `mlr` package with next set of models:
+
+  - classif.randomForest
+  - classif.xgboost
+  - classif.multinom
+  - classif.rpart
+  - classif.ctree
+  - classif.C50
+  
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+earthquake_benchmark_task <- makeClassifTask(id = "Grade of Damage", 
+                         data = earthquake_benchmark, target = "damage_grade",
+                         fixup.data = "warn")
+```
+
+
+Then we make learner.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+lrn_benchmark_mlr <- makeLearners(cls = c("randomForest", "xgboost", "multinom", "rpart", "ctree", "C50"),
+               ids = c("RandomForest", "XGBoost", "Multinom", "rpart", "ctree", "C5.0"),
+               type = "classif", predict.type = "response")
+```
+
+
+We want to use cross-validation to get the best model beyond them.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+earthquake_rdesc <- makeResampleDesc(method = "CV", 
+                                   stratify = TRUE,
+                                   iter = 10)
+```
+
+
+Then we're trying to train our benchmark model. We can't use F-1 score in `mlr` package to measure the quality of multinomial model, so we will rely on Kappa and Accuracy to choose the best model. It seems that there is no simple way to measure macro F-1 score in R.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+clas_ms = list(acc, kappa, mmce)
+
+set.seed(16117, "L'Ecuyer")
+
+num_cores <- parallel::detectCores()
+parallelStartSocket(num_cores)
+
+earthquake_bench <- lrn_benchmark_mlr %>%
+  benchmark(tasks = earthquake_benchmark_task,
+         resampling = earthquake_rdesc,
+         measures = append(list(timetrain), clas_ms),
+         show.info = FALSE)
+
+parallelStop()
+
+```
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, echo=FALSE}
+earthquake_bench <- readRDS('6 models')
+```
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+earthquake_bench %>%
+  getBMRAggrPerformances(as.df = TRUE) %>%
+  arrange(desc(acc.test.mean)) %>%
+  dplyr::select(-c(task.id)) %>%
+  mutate_if(is.numeric, round, digits = 3)
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+earthquake_bench %>%
+  getBMRAggrPerformances(as.df = TRUE) %>%
+  arrange(desc(acc.test.mean)) %>%
+  ggplot(aes(x = fct_inorder(learner.id))) +
+           geom_bar(aes(y = acc.test.mean), stat = "identity") +
+           geom_line(aes(y = timetrain.test.mean/100, group = 1),
+                     colour = "red") +
+  scale_y_continuous(sec.axis = sec_axis(~ . / 100, 
+                                         name = "Время обучения, мс"),
+                     labels = scales::percent) +
+    labs(title = "Сравнение моделей предсказания оттока",
+       x = "Тип модели", y = "ACC")
+```
+
+As we see, the Random Forest and C5.0 have nearly same not really high result. Let's try them on the larger amount of data.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, , eval=FALSE}
+set.seed(375122)
+test_ids <- sample.int(nrow(earthquake_benchmark), size = nrow(earthquake_benchmark) * 0.5)
+earthquake_benchmark_2 <- earthquake_benchmark[test_ids, ]
+earthquake_benchmark_2$damage_grade <- relevel(earthquake_benchmark_2$damage_grade, ref = '2')
+
+earthquake_benchmark_task_2 <- makeClassifTask(id = "Grade of Damage", 
+                         data = earthquake_benchmark_2, target = "damage_grade",
+                         fixup.data = "warn")
+
+lrn_benchmark_mlr_2 <- makeLearners(cls = c("randomForest", "xgboost", "rpart", "C50"),
+               ids = c("RandomForest", "XGBoost", "rpart", "C5.0"),
+               type = "classif", predict.type = "response")
+
+set.seed(16117, "L'Ecuyer")
+
+num_cores <- parallel::detectCores()
+parallelStartSocket(num_cores)
+
+earthquake_bench_2 <- lrn_benchmark_mlr_2 %>%
+  benchmark(tasks = earthquake_benchmark_task_2,
+         resampling = earthquake_rdesc,
+         measures = append(list(timetrain), clas_ms),
+         show.info = FALSE)
+
+parallelStop()
+```
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, echo=FALSE}
+earthquake_bench_2 <- readRDS('4 models')
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+earthquake_bench_2 %>%
+  getBMRAggrPerformances(as.df = TRUE) %>%
+  arrange(desc(acc.test.mean)) %>%
+  dplyr::select(-c(task.id)) %>%
+  mutate_if(is.numeric, round, digits = 3)
+```
+
+
+As we see, C5.0 shows the best quality indicators. It is faster than Random Forest and supplies similar results. Submission by C5.0 to the competition website reveals better result than Random Forest. So, we train C5.0 model on all amount of data.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+set.seed(2626462)
+test_ids <- sample.int(nrow(earthquake_prepared), size = nrow(earthquake_prepared) * 0.1)
+earthquake_benchmark <- earthquake_prepared[test_ids, ]
+
+
+earthquake_task <- makeClassifTask(id = "Grade of Damage",
+                                   data = earthquake_prepared, target = "damage_grade",
+                                   fixup.data = "warn")
+
+lrn_c50 <- makeLearner(cl = "classif.C50",
+                      id = "C5.0",
+                      predict.type = "response")
+
+earthquake_c50 <- train(learner = lrn_rf,
+                       task = earthquake_task)
+```
+
+
+We saved that model into external file, so we won't have to make it twice.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+saveRDS(earthquake_c50, "C5.0")
+```
+
+
+We tried to tune our model, but, unfortunately, we do not possess such a powerful machine to do that. Even after  a night of working it didn't show any result. We also added interactions of variables, but final model was too difficult to calculate, so we were unable to integrate them .
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, echo=FALSE}
+earthquake_c50 <- readRDS("C5.0")
+```
+
+
+Now we are ready to predict the damage grade based on competition test data. To predict correctly, we need to make the same transformations with data, as with the training one.
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+data_to_predict <- read.csv('Test_Values.csv')
+
+data_to_predict$land_surface_condition <- factor(data_to_predict$land_surface_condition)
+data_to_predict$foundation_type <- factor(data_to_predict$foundation_type)
+data_to_predict$roof_type <- factor(data_to_predict$roof_type)
+data_to_predict$ground_floor_type <- factor(data_to_predict$ground_floor_type)
+data_to_predict$other_floor_type <- factor(data_to_predict$other_floor_type)
+data_to_predict$position <- factor(data_to_predict$position)
+data_to_predict$plan_configuration <- factor(data_to_predict$plan_configuration)
+data_to_predict$legal_ownership_status <- factor(data_to_predict$legal_ownership_status)
+
+data_to_predict <- as.data.frame(one_hot(as.data.table(data_to_predict)))
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE, eval=FALSE}
+data_to_predict$damage_grade <- getPredictionResponse(predict(earthquake_c50, newdata = data_to_predict, type = "response"))
+data_to_predict <- data_to_predict %>% dplyr::select(building_id, damage_grade)
+write.csv(data_to_predict,'submission.csv', row.names = FALSE)
+```
+
+
+Using C5.0, we possess result of the 71.77% of F-1 score and get 676th place out of 4318 competitors. It's the top 16% of all participants.
+
+
+We think that the result is pretty good for our model, made in learning purposes, trained on bad performing machines. After tuning the model and data transformations, result might be much higher.
+
+
+With proper modifications and adjustments our model can be used for different purposes in different countries to prevent economical, social, demographical consequences after different earthquake and may be other disastrous. 
+
+
+Limitations of implementing that model in future projects are the same dataset structure, similar conditions and charachteristics of location.
+
+
