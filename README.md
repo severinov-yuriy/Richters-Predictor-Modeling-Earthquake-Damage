@@ -1,6 +1,6 @@
 # **Richter’s Predictor: Modeling Earthquake Damage**
 
-This is a late solution for competition on [**drivendata.com**](http://drivendata.com) within the course **"*Predictive Analytics for Supply Chain Management"*** on ***"Strategic Management of Logistics and Supply Chains in the Digital Economy"*** master's program.
+This is a late solution for competition on [**drivendata.org**](http://drivendata.org) within the course **"*Predictive Analytics for Supply Chain Management"*** on ***"Strategic Management of Logistics and Supply Chains in the Digital Economy"*** master's program.
 
 Requirements for solution was to build a machine learning model, which predicts level of damage for building on their technical, historical, economical characteristics.
 
